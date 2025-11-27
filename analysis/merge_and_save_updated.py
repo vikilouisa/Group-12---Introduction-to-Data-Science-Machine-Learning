@@ -131,9 +131,11 @@ def main():
 
     ANALYSIS_DIR.mkdir(parents=True, exist_ok=True)
     out_path = ANALYSIS_DIR / 'merged_data_updated.csv'
-    # Drop `id` column from the saved merged output (user prefers no product id in merged file)
-    if 'id' in merged.columns:
-        merged = merged.drop(columns=['id'])
+    # Keep `id` column in the saved merged output again (previously removed).
+    # Commented out removal so the `id` stays in the CSV; undo comment if you
+    # want to drop `id` in future runs.
+    # if 'id' in merged.columns:
+    #     merged = merged.drop(columns=['id'])
 
     # write with visible NaN representation
     merged.to_csv(out_path, index=False, na_rep='NaN')
