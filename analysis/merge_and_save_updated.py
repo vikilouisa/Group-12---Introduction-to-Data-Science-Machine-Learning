@@ -48,7 +48,7 @@ def standardize_sales_df(df):
     if war_col and war_col != 'warengruppe':
         df = df.rename(columns={war_col: 'warengruppe'})
 
-    # umsatz (may be missing)
+    # umsatz
     u_col = find_column(df, ['umsatz'])
     if u_col:
         if u_col != 'umsatz':
@@ -75,6 +75,22 @@ def main():
     umsatz = read_and_normalize(umsatz_path)
     wetter = read_and_normalize(wetter_path)
     kiwo = read_and_normalize(kiwo_path)
+
+    # --- NEW: read holidays ---
+    school_path = ROOT / 'Ferien_SH.csv'
+    public_path = ROOT / 'Feiertage_holidays_sh_2013_2019.csv'
+
+    school = read_and_normalize(school_path)
+    public = read_and_normalize(public_path)
+
+    # School holidays → holiday = 1
+    school['school_holiday'] = 1
+    school = school[['date', 'school_holiday']]
+
+    # Public holidays already 1/0 → rename
+    public = public.rename(columns={'is_holiday': 'public_holiday'})
+    public = public[['date', 'public_holiday']]
+    # --- END NEW ---
 
     # prepare sales: optionally append continuation from analysis/test.csv
     umsatz = standardize_sales_df(umsatz)
@@ -108,36 +124,41 @@ def main():
     else:
         umsatz['umsatz'] = pd.NA
 
-    # Merge (sales as left)
+    # Merge
     print('Merging with weather and kiwo (left join on date)...')
     merged = umsatz.merge(wetter, on='date', how='left')
     merged = merged.merge(kiwo, on='date', how='left')
 
-    # Convert selected columns to nullable integer to remove trailing .0 while keeping NA
+    # --- NEW: merge holiday data ---
+    merged = merged.merge(school, on='date', how='left')
+    merged = merged.merge(public, on='date', how='left')
+
+    merged['school_holiday'] = merged['school_holiday'].fillna(0).astype('Int64')
+    merged['public_holiday'] = merged['public_holiday'].fillna(0).astype('Int64')
+    # --- END NEW ---
+
+    # Convert selected columns to nullable int
     int_cols = ['Bewoelkung', 'Windgeschwindigkeit', 'KielerWoche']
     for c in int_cols:
         if c in merged.columns:
             merged[c] = pd.to_numeric(merged[c], errors='coerce').round(0).astype('Int64')
 
-    # Reorder rows: date, warengruppe, id
+    # Reorder rows
     sort_keys = [k for k in ['date', 'warengruppe', 'id'] if k in merged.columns]
     if sort_keys:
         merged = merged.sort_values(by=sort_keys, na_position='last')
 
-    # Reorder columns: prefer this order, then keep any remaining columns
-    preferred = ['date', 'warengruppe', 'id', 'umsatz', 'Bewoelkung', 'Temperatur', 'Windgeschwindigkeit', 'Wettercode', 'KielerWoche']
-    cols_order = [c for c in preferred if c in merged.columns] + [c for c in merged.columns if c not in preferred]
+    # Column order
+    preferred = ['date', 'warengruppe', 'id', 'umsatz',
+                 'Bewoelkung', 'Temperatur', 'Windgeschwindigkeit', 'Wettercode',
+                 'KielerWoche', 'school_holiday', 'public_holiday']
+    cols_order = [c for c in preferred if c in merged.columns] + \
+                 [c for c in merged.columns if c not in preferred]
     merged = merged[cols_order]
 
     ANALYSIS_DIR.mkdir(parents=True, exist_ok=True)
     out_path = ANALYSIS_DIR / 'merged_data_updated.csv'
-    # Keep `id` column in the saved merged output again (previously removed).
-    # Commented out removal so the `id` stays in the CSV; undo comment if you
-    # want to drop `id` in future runs.
-    # if 'id' in merged.columns:
-    #     merged = merged.drop(columns=['id'])
 
-    # write with visible NaN representation
     merged.to_csv(out_path, index=False, na_rep='NaN')
 
     print(f'Wrote updated merged CSV to: {out_path} (rows: {len(merged)})')
